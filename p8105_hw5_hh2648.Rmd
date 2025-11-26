@@ -1,0 +1,151 @@
+---
+title: "P8105 Data Science I - Homework 6"
+author: "Heng Hu (hh2648)"
+date: 2025-11-26
+output: github_document
+---
+
+```{r, message = FALSE}
+# Setup
+library(tidyverse)
+```
+
+
+## Problem 1
+
+```{r, message=FALSE, warning=FALSE}
+
+# Read and tidy the data
+homicides = read_csv(file = "./data/homicide-data.csv") |> 
+   mutate(state = toupper(state),
+          city_state = str_c(city, ", ", state),
+          reported_date = case_match(reported_date,
+                                     201511018 ~ 20151018,
+                                     201511105 ~ 20151105,
+                                     .default = reported_date),
+          reported_date = ymd(reported_date),
+          victim_race = as.factor(victim_race),
+          victim_age = as.numeric(victim_age),
+          victim_sex = as.factor(victim_sex),
+          disposition = as.factor(disposition),
+          resolved = ifelse(disposition %in% c("Open/No arrest", "Closed without arrest"), FALSE, TRUE)) |> 
+  filter(!city_state %in% c("Dallas, TX", " Phoenix, AZ", "Kansas City, MO", "Tulsa, AL"),
+         victim_race %in% c("White", "Black"))
+
+# Use the glm function to fit a logistic regression in Baltimore
+baltimore_glm = homicides |> 
+  filter(city_state == "Baltimore, MD") |> 
+  glm(resolved ~ victim_age + victim_race + victim_sex, data = _, family = binomial())
+
+baltimore_glm |> 
+  broom::tidy(exponentiate = TRUE, conf.int = TRUE) |> 
+  select(term, OR = estimate, conf.low, conf.high) |> 
+  filter(term == "victim_sexMale") |> 
+  knitr::kable()
+
+# Apply to all the cities
+all_est = homicides |> 
+  nest(.by = city_state) |> 
+  mutate(glm = map(data, \(df) glm(resolved ~ victim_age + victim_race + victim_sex, data = df, family = binomial())),
+         est = map(glm, broom::tidy, exponentiate = TRUE, conf.int = TRUE)) |>
+  unnest(cols = est) |> 
+  filter(term == "victim_sexMale") |> 
+  select(city_state, term, OR = estimate, conf.low, conf.high)
+
+# Make a plot
+all_est |> 
+  ggplot(aes(x = OR, y = fct_reorder(city_state, OR))) +
+  geom_point() +
+  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), width = 0.6) +
+  geom_vline(xintercept = 1, color = "red") +
+  labs(title = "Adjusted Odds Ratios by City",
+       x = "Odds Ratio",
+       y = "City") +
+  theme_minimal()
+
+```
+
+The plot indicates 
+
+
+## Problem 2
+
+```{r}
+
+# Read and tidy the data
+library(p8105.datasets)
+data("weather_df")
+
+```
+
+**Table of the number of unsolved homicides by city:**
+
+```{r}
+
+unsolved_homi = homicides |> 
+  filter(unsolved) |> 
+  group_by(city_state) |>  
+  summarize(unsolved_num = n())
+
+unsolved_homi |> 
+  knitr::kable(col.names = c("City", "Number of Unsolved Homicides"))
+  
+```
+
+**For the city of Baltimore, MD, use the `prop.test` to estimate the proportion of unsolved homicides and its 95% CI.**
+
+```{r}
+
+all_homi = inner_join(unsolved_homi, total_homi, by = "city_state" )
+
+baltimore_homi = all_homi |> 
+  filter(city_state == "Baltimore, MD")
+
+baltimore_prop = prop.test(baltimore_homi$unsolved_num, baltimore_homi$total_num) |> 
+  broom::tidy() |> 
+  select(estimate, conf.low, conf.high) |> 
+  janitor::clean_names()
+
+baltimore_prop |> 
+  knitr::kable(col.names = c("Estimate", "Lower 95% CI", "Upper 95% CI"),
+               digits = 3)
+
+```
+
+**Apply the proportion estimation to all cities.**
+
+```{r}
+
+# Create function to estimate the proportion and 95% CI.
+
+my_proptest = function(x, n) {
+
+  prop = prop.test(x, n) |> 
+  broom::tidy() |> 
+  select(estimate, conf.low, conf.high) |> 
+  janitor::clean_names()
+  
+}
+
+# Apply it to all cities.
+
+all_prop = all_homi |> 
+  mutate(prop_test = map2(unsolved_num, total_num, my_proptest)) |> 
+  unnest(cols = prop_test) |> 
+  select(city_state, estimate, conf_low, conf_high)
+
+# Make a plot to show the estimates and CIs for each city.
+
+all_prop |> 
+  ggplot(aes(x = fct_reorder(city_state, estimate), y = estimate)) +
+  geom_point() +
+  geom_errorbar(mapping = aes(ymax = conf_high, ymin = conf_low)) +
+  labs(
+    title = "Proportion of Unsolved Homicides with 95% Confidence Intervals by City",
+    x = "City",
+    y = "Proportion of Unsolved Homicides",
+    caption = "Data from The Washington Post"
+  ) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+```
