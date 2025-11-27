@@ -8,6 +8,7 @@ output: github_document
 ```{r, message = FALSE}
 # Setup
 library(tidyverse)
+set.seed(2648)
 ```
 
 
@@ -46,17 +47,17 @@ baltimore_glm |>
 # Apply to all the cities
 all_est = homicides |> 
   nest(.by = city_state) |> 
-  mutate(glm = map(data, \(df) glm(resolved ~ victim_age + victim_race + victim_sex, data = df, family = binomial())),
-         est = map(glm, broom::tidy, exponentiate = TRUE, conf.int = TRUE)) |>
-  unnest(cols = est) |> 
+  mutate(model = map(data, \(df) glm(resolved ~ victim_age + victim_race + victim_sex, data = df, family = binomial())),
+         result = map(model, broom::tidy, exponentiate = TRUE, conf.int = TRUE)) |>
+  unnest(cols = result) |> 
   filter(term == "victim_sexMale") |> 
-  select(city_state, term, OR = estimate, conf.low, conf.high)
+  select(city_state, term, OR = estimate, ci_lower = conf.low, ci_upper = conf.high)
 
 # Make a plot
 all_est |> 
   ggplot(aes(x = OR, y = fct_reorder(city_state, OR))) +
   geom_point() +
-  geom_errorbar(aes(xmin = conf.low, xmax = conf.high), width = 0.6) +
+  geom_errorbar(aes(xmin = ci_lower, xmax = ci_upper), width = 0.6) +
   geom_vline(xintercept = 1, color = "red") +
   labs(title = "Adjusted Odds Ratios by City",
        x = "Odds Ratio",
@@ -76,76 +77,38 @@ The plot indicates
 library(p8105.datasets)
 data("weather_df")
 
-```
+# Apply boostrap to calculate r squared and beta ratio
+weather = weather_df |> 
+  modelr::bootstrap(n = 5000) |> 
+  mutate(model = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df)),
+         result_1 = map(model, broom::glance),
+         result_2 = map(model, broom::tidy)) |>
+  unnest(cols = c(result_1, result_2), names_sep = "_") |> 
+  select(.id, r_squared = result_1_r.squared, covar = result_2_term, est = result_2_estimate) |> 
+  filter(covar != "(Intercept)") |> 
+  pivot_wider(names_from = covar, values_from = est) |> 
+  mutate(beta_ratio = tmin / prcp) |> 
+  select(-tmin, -prcp) |> 
+  pivot_longer(cols = c(r_squared, beta_ratio), 
+               names_to = "term", values_to = "est")
 
-**Table of the number of unsolved homicides by city:**
+# Make a plot to see the distribution of the two quantities
+weather |> 
+  ggplot(aes(x = est)) +
+  geom_density() +
+  facet_wrap(~ term, scales = "free")
 
-```{r}
-
-unsolved_homi = homicides |> 
-  filter(unsolved) |> 
-  group_by(city_state) |>  
-  summarize(unsolved_num = n())
-
-unsolved_homi |> 
-  knitr::kable(col.names = c("City", "Number of Unsolved Homicides"))
-  
-```
-
-**For the city of Baltimore, MD, use the `prop.test` to estimate the proportion of unsolved homicides and its 95% CI.**
-
-```{r}
-
-all_homi = inner_join(unsolved_homi, total_homi, by = "city_state" )
-
-baltimore_homi = all_homi |> 
-  filter(city_state == "Baltimore, MD")
-
-baltimore_prop = prop.test(baltimore_homi$unsolved_num, baltimore_homi$total_num) |> 
-  broom::tidy() |> 
-  select(estimate, conf.low, conf.high) |> 
-  janitor::clean_names()
-
-baltimore_prop |> 
-  knitr::kable(col.names = c("Estimate", "Lower 95% CI", "Upper 95% CI"),
-               digits = 3)
+# Get 95% CI for the two quantities
+weather |> 
+  group_by(term) |> 
+  summarise(ci_lower = quantile(est, 0.025),
+            ci_upper = quantile(est, 0.975)) |> 
+  mutate(across(c(ci_lower, ci_upper), ~ formatC(signif(.x, 4), width = 4))) |>
+  knitr::kable(col.names = c("Term", "95% CI Lower", "95% CI Upper"))
 
 ```
 
-**Apply the proportion estimation to all cities.**
+The plot indicates 
 
-```{r}
 
-# Create function to estimate the proportion and 95% CI.
-
-my_proptest = function(x, n) {
-
-  prop = prop.test(x, n) |> 
-  broom::tidy() |> 
-  select(estimate, conf.low, conf.high) |> 
-  janitor::clean_names()
-  
-}
-
-# Apply it to all cities.
-
-all_prop = all_homi |> 
-  mutate(prop_test = map2(unsolved_num, total_num, my_proptest)) |> 
-  unnest(cols = prop_test) |> 
-  select(city_state, estimate, conf_low, conf_high)
-
-# Make a plot to show the estimates and CIs for each city.
-
-all_prop |> 
-  ggplot(aes(x = fct_reorder(city_state, estimate), y = estimate)) +
-  geom_point() +
-  geom_errorbar(mapping = aes(ymax = conf_high, ymin = conf_low)) +
-  labs(
-    title = "Proportion of Unsolved Homicides with 95% Confidence Intervals by City",
-    x = "City",
-    y = "Proportion of Unsolved Homicides",
-    caption = "Data from The Washington Post"
-  ) +
-  theme(axis.text.x = element_text(angle = 60, hjust = 1))
-
-```
+## Problem 3
