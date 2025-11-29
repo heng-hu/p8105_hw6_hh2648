@@ -44,7 +44,8 @@ baltimore_glm |>
   broom::tidy(exponentiate = TRUE, conf.int = TRUE) |> 
   select(term, OR = estimate, conf.low, conf.high) |> 
   filter(term == "victim_sexMale") |> 
-  knitr::kable(col.names = c("Term", "OR", "95% CI Lower", "95% CI Upper"))
+  knitr::kable(digits = 3,
+               col.names = c("Term", "OR", "95% CI Lower", "95% CI Upper"))
 
 # Apply to all the cities
 all_est = homicides |> 
@@ -73,7 +74,7 @@ The plot indicates that, in most cities, the OR for solving homicides involving 
 
 ## Problem 2
 
-```{r fig.width = 8, fig.height = 6}
+```{r fig.width = 12, fig.height = 6}
 
 # Read and tidy the data
 library(p8105.datasets)
@@ -103,7 +104,7 @@ weather |>
 
 ```
 
-After performing 5000 bootstrap resamples to estimate the two quantities, their distributions appear approximately normal. The distribution of $\beta$ ratio is slightly left-skewed, with a median around -170, while the adjusted $R^2$ has a median near 0.942.
+After performing 5000 bootstrap resamples to estimate the two quantities, the figure above shows their distributions. The distribution of $\beta$ ratio is left-skewed, with a median around -170, while the adjusted $R^2$ has an approximately normal distribution, with a median near 0.942.
 
 ```{r}
 
@@ -212,3 +213,4 @@ cv_df |>
   
 ```
 
+The RMSE plot indicates model 1 has the lowest RSME among the 3 models.
